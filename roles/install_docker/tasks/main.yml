@@ -1,0 +1,42 @@
+#SPDX-License-Identifier: MIT-0
+---
+# tasks file for install_docker
+
+- name: Rimuovo pacchetti che potrebbero dare conflitti 
+  ansible.builtin.dnf:
+    name: "{{ rm_packages }}"
+    state: absent 
+
+- name: Aggiungo il repository ufficiale di docker 
+  ansible.builtin.yum_repository:
+    name: docker-ce-stable
+    description: Docker CE Stable - $basearch
+    baseurl: "{{ docker_repo_baseurl }}"
+    enabled: true
+    gpgcheck: true
+    gpgkey: "{{ docker_repo_gpgkey }}"
+
+- name: Installo docker engine e i relativi plugin
+  ansible.builtin.dnf:
+    name: "{{ packages }}"
+    state: present
+    update_cache: true
+
+- name: Abilito e avvio docker
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Aggiungo utenti al gruppo docker 
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  loop: "{{ docker_users }}"
+  when: docker_users | length > 0
+
+- name: Installa SDK Python per Docker (richiesto da community.docker)
+  ansible.builtin.dnf:
+    name: python3-docker
+    state: present

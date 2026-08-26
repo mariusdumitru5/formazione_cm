@@ -1,0 +1,36 @@
+---
+- hosts: all
+  become: true
+  roles:
+    - role: install_docker
+  vars:
+    registry_port: "5000"
+    registry_container_name: "docker-registry"
+    registry_storage_dir: "/var/lib/docker-registry"
+  tasks:
+    - name: Apri la porta del Registry nel firewall (firewalld)
+      ansible.posix.firewalld:
+        port: "{{ registry_port }}/tcp"
+        permanent: true
+        state: enabled
+        immediate: true
+      ignore_errors: true  
+  
+    - name: Crea la directory locale per la persistenza delle immagini del Registry
+      ansible.builtin.file:
+        path: "{{ registry_storage_dir }}"
+        state: directory
+        mode: '0755'
+  
+    - name: Avvia il container del Docker Registry (registry:2)
+      community.docker.docker_container:
+        name: "{{ registry_container_name }}"
+        image: registry:2
+        state: started
+        restart_policy: always
+        published_ports:
+          - "{{ registry_port }}:5000"
+        env:
+          REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+        volumes:
+          - "{{ registry_storage_dir }}:/var/lib/registry:z"
