@@ -1,0 +1,26 @@
+FROM rockylinux:9
+
+RUN dnf install -y \
+    openssh-server \
+    sudo \
+    && dnf clean all
+
+RUN ssh-keygen -A
+
+RUN useradd -m -s /bin/bash ansible && \
+    echo "ansible ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ansible && \
+    chmod 0440 /etc/sudoers.d/ansible
+
+ARG SSH_PUBLIC_KEY
+RUN mkdir -p /home/ansible/.ssh && chmod 700 /home/ansible/.ssh && \
+    echo "$SSH_PUBLIC_KEY" > /home/ansible/.ssh/authorized_keys && \
+    chmod 600 /home/ansible/.ssh/authorized_keys && \
+    chown -R ansible:ansible /home/ansible/.ssh
+
+RUN sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
+    sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
+    echo 'AllowUsers ansible' >> /etc/ssh/sshd_config
+
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D"]

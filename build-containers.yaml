@@ -1,0 +1,61 @@
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Genera la coppia di chiavi SSH 
+      community.crypto.openssh_keypair:
+        path: "{{ playbook_dir }}/Dockerfiles/id_rsa"
+        type: rsa
+        state: present
+      register: ssh_key_result
+
+    - name: Leggo contenuto della chiave
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/Dockerfiles/id_rsa.pub"
+      register: pub_key_encoded
+
+    - name: Imposto la variabile con il testo della chiave pubblica
+      ansible.builtin.set_fact:
+        pub_key_content: "{{ pub_key_encoded.content | b64decode }}"
+
+    # ------------------ UBUNTU 22.04 ------------------
+    - name: Build immagine Ubuntu 22.04
+      community.docker.docker_image:
+        name: ubuntu-ssh-node
+        build:
+          path: ./Dockerfiles
+          dockerfile: Dockerfile.ubuntu
+          args:
+            SSH_PUBLIC_KEY: "{{ pub_key_content }}"
+          pull: true
+        source: build
+
+    - name: Avvio container Ubuntu (Porta 2221)
+      community.docker.docker_container:
+        name: node-ubuntu
+        image: ubuntu-ssh-node
+        state: started
+        restart_policy: always
+        ports:
+          - "2221:22"
+
+    # ------------------ ROCKY LINUX 9 ------------------
+    - name: Build immagine Rocky Linux 9
+      community.docker.docker_image:
+        name: rocky-ssh-node
+        build:
+          path: ./Dockerfiles
+          dockerfile: Dockerfile.rocky
+          args:
+            SSH_PUBLIC_KEY: "{{ pub_key_content }}"
+          pull: true
+        source: build
+
+    - name: Avvio container Rocky Linux (Porta 2222)
+      community.docker.docker_container:
+        name: node-rocky
+        image: rocky-ssh-node
+        state: started
+        restart_policy: always
+        ports:
+          - "2222:22"
