@@ -1,0 +1,10 @@
+---
+- name: Build dell'immagine container tramite Docker
+  community.docker.docker_image:
+    name: "{{ container_image }}"
+    build:
+      path: "./Dockerfiles"          
+      dockerfile: "{{ dockerfile_name | default('Dockerfile') }}"
+      pull: true  
+    source: build
+    state: present

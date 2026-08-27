@@ -1,0 +1,9 @@
+#SPDX-License-Identifier: MIT-0
+---
+# defaults file for generic_engine_build
+# 'auto', 'docker' o 'podman'
+container_engine: "auto"
+
+# Configurazione del container
+container_image: "immagine-ubuntu:1.0"
+dockerfile_name: Dockerfile.ubuntu

@@ -1,0 +1,25 @@
+#SPDX-License-Identifier: MIT-0
+---
+# tasks file for generic_engine_build
+- name: Verifica presenza Podman sul sistema
+  ansible.builtin.command: type podman
+  register: podman_check
+  ignore_errors: true
+  changed_when: false
+  failed_when: false   
+  when: container_engine == "auto"
+
+- name: Imposta l'engine effettivo da utilizzare
+  ansible.builtin.set_fact:
+    effective_engine: >-
+      {{
+        'podman' if (container_engine == 'auto' and podman_check.rc | default(1) == 0)
+        else (container_engine if container_engine != 'auto' else 'docker')
+      }}
+
+- name: Stampa l'engine selezionato
+  ansible.builtin.debug:
+    msg: "Utilizzo dell'engine: {{ effective_engine }}"
+
+- name: Esecuzione task per {{ effective_engine }}
+  ansible.builtin.include_tasks: "engine_{{ effective_engine }}.yaml"
