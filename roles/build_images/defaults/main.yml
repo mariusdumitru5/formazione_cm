@@ -11,5 +11,6 @@ dockerfile_a: Dockerfile.ubuntu
 dockerfile_b: Dockerfile.rocky
 
 ports_a: "2221:22"
-
 ports_b: "2222:22"
+
+registry_ip: "192.168.99.20:5000"

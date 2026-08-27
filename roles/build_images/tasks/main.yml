@@ -20,7 +20,7 @@
 # ------------------ UBUNTU 22.04 ------------------
 - name: Build immagine Ubuntu 22.04
   community.docker.docker_image:
-    name: "{{ image_name_a }}"
+    name: "{{ image_name_a }}:{{ tag | default('latest') }}"
     build:
       path: ./Dockerfiles
       dockerfile: "{{ dockerfile_a }}"
@@ -32,7 +32,7 @@
 - name: Avvio container Ubuntu (Porta 2221)
   community.docker.docker_container:
     name: "{{ container_name_a }}"
-    image: "{{ image_name_a }}"
+    image: "{{ image_name_a }}:{{ tag | default('latest') }}"
     state: started
     restart_policy: always
     ports:
@@ -41,7 +41,7 @@
 # ------------------ ROCKY LINUX 9 ------------------
 - name: Build immagine Rocky Linux 9
   community.docker.docker_image:
-    name: "{{ image_name_b }}"
+    name: "{{ image_name_b }}:{{ tag | default('latest') }}"
     build:
       path: ./Dockerfiles
       dockerfile: "{{ dockerfile_b }}"
@@ -53,8 +53,36 @@
 - name: Avvio container Rocky Linux (Porta 2222)
   community.docker.docker_container:
     name: "{{ container_name_b }}"
-    image: "{{ image_name_b }}"
+    image: "{{ image_name_b }}:{{ tag | default('latest') }}"
     state: started
     restart_policy: always
     ports:
       - "{{ ports_b }}"
+
+# ------------------ Push Immagini in registry locale ------------------
+# Per macchine che non hanno MacOS
+# - name: Configura il registry HTTP su daemon.json
+#   ansible.builtin.copy:
+#     dest: /etc/docker/daemon.json
+#     content: |
+#       {
+#         "insecure-registries": ["{{ registry_ip }}"]
+#       }
+#     mode: '0644'
+#   register: docker_config
+
+# - name: Riavvia il servizio Docker se la configurazione è cambiata
+#   ansible.builtin.service:
+#     name: docker
+#     state: restarted
+#   when: docker_config.changed
+
+- name: Push dell'immagine sul Registry
+  community.docker.docker_image:
+    name: "{{ item }}:{{ tag | default('latest') }}"
+    repository: "{{ registry_ip }}/{{ item }}:{{ tag | default('latest') }}"
+    push: true
+    source: local
+  loop: 
+    - "{{ image_name_a }}"
+    - "{{ image_name_b }}"
