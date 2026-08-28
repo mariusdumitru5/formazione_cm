@@ -27,7 +27,7 @@ def buildAndPushTag(Map args) {
 }
 
 pipeline {
-    agent { label 'Mac-agent' }
+    agent { label 'mac-agent' }
     
     environment {
         IMAGE_NAME = 'docker-in-docker'
