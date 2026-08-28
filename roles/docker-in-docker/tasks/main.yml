@@ -1,0 +1,43 @@
+#SPDX-License-Identifier: MIT-0
+---
+# tasks file for docker-in-docker
+#---------- Genera chiavi ssh ---------------
+- name: Genera la coppia di chiavi SSH 
+  community.crypto.openssh_keypair:
+    path: "{{ playbook_dir }}/../Dockerfiles/id_rsa"
+    type: rsa
+    state: present
+  register: ssh_key_result
+
+- name: Leggo contenuto della chiave
+  ansible.builtin.slurp:
+    src: "{{ playbook_dir }}/../Dockerfiles/id_rsa.pub"
+  register: pub_key_encoded
+
+- name: Imposto la variabile con il testo della chiave pubblica
+  ansible.builtin.set_fact:
+    pub_key_content: "{{ pub_key_encoded.content | b64decode }}"
+
+#---------- Docker in docker ---------------
+- name: Build Immagine Ubuntu DinD
+  community.docker.docker_image:
+    name: ubuntu-dind-node
+    build:
+      path: ../Dockerfiles
+      dockerfile: Dockerfile.docker
+      args:
+        SSH_PUBLIC_KEY: "{{ pub_key_content }}"
+      pull: true
+    source: build
+
+- name: Avvio Container Ubuntu DinD (Porta 2223)
+  community.docker.docker_container:
+    name: node-dind
+    image: ubuntu-dind-node
+    state: started
+    restart_policy: always
+    privileged: true   # <-- INDISPENSABILE per DinD
+    ulimits:
+          - "nofile:262144:262144"
+    ports:
+      - "2223:22"

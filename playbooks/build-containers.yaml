@@ -4,14 +4,14 @@
   tasks:
     - name: Genera la coppia di chiavi SSH 
       community.crypto.openssh_keypair:
-        path: "{{ playbook_dir }}/Dockerfiles/id_rsa"
+        path: "{{ playbook_dir }}/../Dockerfiles/id_rsa"
         type: rsa
         state: present
       register: ssh_key_result
 
     - name: Leggo contenuto della chiave
       ansible.builtin.slurp:
-        src: "{{ playbook_dir }}/Dockerfiles/id_rsa.pub"
+        src: "{{ playbook_dir }}/../Dockerfiles/id_rsa.pub"
       register: pub_key_encoded
 
     - name: Imposto la variabile con il testo della chiave pubblica
