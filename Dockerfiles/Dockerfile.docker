@@ -4,7 +4,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
-# 1. Installazione pacchetti base e repository Docker
 RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-transport-https \
     ca-certificates \
@@ -16,7 +15,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Aggiunta repo e installazione effettiva di Docker Engine
 RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable" > /etc/apt/sources.list.d/docker.list && \
@@ -26,20 +24,17 @@ RUN mkdir -p /etc/apt/keyrings && \
     containerd.io \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. Creazione utente ansible, gruppo docker e sudoers
 RUN useradd -m -s /bin/bash ansible && \
     usermod -aG docker ansible && \
     echo "ansible ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ansible && \
     chmod 0440 /etc/sudoers.d/ansible
 
-# 4. Iniezione chiave SSH
 ARG SSH_PUBLIC_KEY
 RUN mkdir -p /home/ansible/.ssh && chmod 700 /home/ansible/.ssh && \
     echo "$SSH_PUBLIC_KEY" > /home/ansible/.ssh/authorized_keys && \
     chmod 600 /home/ansible/.ssh/authorized_keys && \
     chown -R ansible:ansible /home/ansible/.ssh
 
-# 5. Configurazione SSHD
 RUN mkdir /var/run/sshd && \
     sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config && \
     sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
@@ -48,5 +43,4 @@ RUN mkdir /var/run/sshd && \
 
 EXPOSE 22
 
-# 6. Avvio dei servizi
 CMD service docker start && /usr/sbin/sshd -D

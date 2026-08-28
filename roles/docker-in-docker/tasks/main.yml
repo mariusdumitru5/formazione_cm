@@ -36,7 +36,7 @@
     image: ubuntu-dind-node
     state: started
     restart_policy: always
-    privileged: true   # <-- INDISPENSABILE per DinD
+    privileged: true  
     ulimits:
           - "nofile:262144:262144"
     ports:
