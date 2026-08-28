@@ -88,6 +88,10 @@ RUN useradd -m -s /bin/bash ansible && \
     chmod 0440 /etc/sudoers.d/ansible
 ```
 
+- `useradd -m -s /bin/bash ansible`: Crea l'utente di sistema ansible, genera la sua home directory (/home/ansible) e imposta Bash come shell predefinita.
+- `NOPASSWD:ALL in /etc/sudoers.d/ansible`: Garantisce all'utente privilegi di root senza richiedere l'inserimento interattivo della password. Questo è fondamentale per le esecuzioni automatiche non presidiate dei playbook Ansible.
+- `chmod 0440`: Imposta il file in sola lettura per il proprietario e per il gruppo root. Per ragioni di sicurezza, `sudo` ignora e rifiuta automaticamente qualsiasi file in `/etc/sudoers.d/` che possegga permessi troppo aperti.
+
 2. Tramite l'argomento di build `SSH_PUBLIC_KEY`, viene iniettata la chiave pubblica necessaria all'autenticazione:
 
 ```Dockerfile
@@ -97,6 +101,12 @@ RUN mkdir -p /home/ansible/.ssh && chmod 700 /home/ansible/.ssh && \
     chmod 600 /home/ansible/.ssh/authorized_keys && \
     chown -R ansible:ansible /home/ansible/.ssh
 ```
+
+- `chmod 700` su `.ssh`: Limita i permessi della cartella alla sola lettura, scrittura ed esecuzione per l'utente ansible `(rwx------)`.
+- `chmod 600` su `authorized_keys`: Imposta l'accesso al file contenente la chiave pubblica in sola lettura e scrittura per il proprietario `(rw-------)`.
+- `chown -R ansible:ansible`: Assegna la proprietà di directory e file all'utente ansible.
+  
+`OpenSSH` abilita di default la direttiva `StrictModes yes`. Se la cartella `.ssh` o il file `authorized_keys` hanno permessi di gruppo o globali troppo permissivi (es. 777 o 644), il server SSH rifiuterà silenziosamente qualsiasi tentativo di autenticazione.
 
 3. Vengono applicate le direttive di sicurezza sul `daemon sshd` (disabilitazione del login da root e via password, restrizione degli accessi al solo utente ansible):
 
@@ -108,6 +118,11 @@ RUN mkdir /var/run/sshd && \
     echo 'AllowUsers ansible' >> /etc/ssh/sshd_config
 ```
 
+- `mkdir /var/run/sshd`: Crea la cartella di runtime usata da `sshd` per la separazione dei privilegi. Nei container Ubuntu la mancanza di questa directory impedisce al daemon SSH di avviarsi.
+- `PermitRootLogin no`: Disabilita l'accesso diretto SSH come utente root, riducendo la superficie d'attacco.
+- `PasswordAuthentication no`: Disattiva completamente l'autenticazione tramite password, rendendo obbligatorio l'uso delle chiavi SSH e proteggendo il container da attacchi brute-force.
+- `AllowUsers ansible`: Applica una restrizione esplicita che autorizza esclusivamente l'utente ansible a stabilire sessioni SSH.
+
 4. Viene dichiarata la `porta 22` e configurato l'avvio automatico del server SSH in foreground:
 
 ```Dockerfile
@@ -115,6 +130,50 @@ EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D"]
 ```
 
+Per quanto riguarda `Dockerfile.rocky` il procedimento è quasi identico. Bisogna fare `RUN ssh-keygen -A` dopo aver installato il server ssh perché l'installazione del pacchetto `openssh-server` non crea automaticamente le chiavi host del server SSH. Quindi il comando serve proprio a generare tutte le chiavi host mancanti per SSH.
+
 ##### build-containers.yaml
 
-D
+1. Vengono generati le chiavi ssh tramite il modulo ` community.crypto.openssh_keypair` e poi viene salvato il contenuto della chiave pubblica nella variabile `pub_key_content`:
+
+```yaml
+- name: Genera la coppia di chiavi SSH 
+  community.crypto.openssh_keypair:
+    path: "{{ playbook_dir }}/../Dockerfiles/id_rsa"
+    type: rsa
+    state: present
+  register: ssh_key_result
+
+- name: Leggo contenuto della chiave
+  ansible.builtin.slurp:
+    src: "{{ playbook_dir }}/../Dockerfiles/id_rsa.pub"
+  register: pub_key_encoded
+
+- name: Imposto la variabile con il testo della chiave pubblica
+  ansible.builtin.set_fact:
+    pub_key_content: "{{ pub_key_encoded.content | b64decode }}"
+```
+
+2. Vengono buildate le due immagini docker e avviati i container corrispettivi attraverso i moduli `community.docker.docker_image` e `community.docker.docker_container`:
+
+```yaml
+- name: Build immagine Ubuntu 22.04
+  community.docker.docker_image:
+    name: ubuntu-ssh-node
+    build:
+      path: ./Dockerfiles
+      dockerfile: Dockerfile.ubuntu
+      args:
+        SSH_PUBLIC_KEY: "{{ pub_key_content }}"
+      pull: true
+    source: build
+
+- name: Avvio container Ubuntu (Porta 2221)
+  community.docker.docker_container:
+    name: node-ubuntu
+    image: ubuntu-ssh-node
+    state: started
+    restart_policy: always
+    ports:
+      - "2221:22"
+```
