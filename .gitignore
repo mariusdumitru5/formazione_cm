@@ -1,0 +1,4 @@
+Vagrantfile 
+.vagrant/
+*.log
+.DS_Store
