@@ -177,3 +177,258 @@ Per quanto riguarda `Dockerfile.rocky` il procedimento è quasi identico. Bisogn
     ports:
       - "2221:22"
 ```
+
+### Step 3 - Creazione di un ruolo
+
+- Utilizzando i precedenti Step come task, crea più ruoli Ansibile con le seguenti caratteristiche:
+  - Creazione e configurazione di un registry 
+  - Build di almeno due container 
+  - Push delle build sul registry precedentemente creato
+  - Run dei container in modo che non vadano in conflitto di porte tra loro
+- Sarà considerato un plus se tutto parametrizziato
+- Creare uno o più ruoli che funzionino sia con Docker che con Podman 
+
+Per questo step è bastato creare i role con `ansible-galaxy role init` e poi adattare i playbook scritti prima. 
+
+La parte più interessante è stata l'ultimo punto in cui è stato creato un ruolo che funziona sia con Docker che con Podman, in base a quello che c'è sulla macchina taget. Il ruolo in questione si chiama `roles/generic_engine_build`. 
+
+#### generic_engine_build
+
+1. `defaults/main.yaml`
+   
+Questo file contiene le variabili che possono essere facilmente sovrascrivibili. In particolare si trova il nome dell'immagine da buildare, il nome del container e l'engine che deve essere usato per la build dell'immagine e la gestione del container:
+
+```yaml
+# 'auto', 'docker' o 'podman'
+container_engine: "auto"
+
+# Configurazione del container
+container_image: "immagine-ubuntu:1.0"
+dockerfile_name: Dockerfile.ubuntu
+```
+
+2. `tasks/main.yaml`
+   
+La task principale del role. Verifica ce c'è installato Podman sulla macchina host e salva lo stato. In base a questo viene impostata la variabile `effective_engine` che serve poi a includere un altro file di task.
+
+```yaml
+- name: Imposta l'engine effettivo da utilizzare
+  ansible.builtin.set_fact:
+    effective_engine: >-
+      {{
+        'podman' if (container_engine == 'auto' and podman_check.rc | default(1) == 0)
+        else (container_engine if container_engine != 'auto' else 'docker')
+      }}
+```
+
+Se sul sistema c'è Podman(ed è stato scelto come engine) oppure l'engine è impostato su `auto`, allora `effective_engine = podman`. Altrimenti `effective_engine = docker`:
+
+```yaml
+- name: Esecuzione task per {{ effective_engine }}
+  ansible.builtin.include_tasks: "engine_{{ effective_engine }}.yaml"
+```
+In questo modo viene scelto il file giusto con le task relative all'engine scelto.
+
+3. `tasks/engine_docker.yaml`
+
+Fa la build dell'immagine con Docker 
+
+```yaml
+- name: Build dell'immagine container tramite Docker
+  community.docker.docker_image:
+    name: "{{ container_image }}"
+    build:
+      path: "./Dockerfiles"          
+      dockerfile: "{{ dockerfile_name | default('Dockerfile') }}"
+      pull: true  
+    source: build
+    state: present
+```
+
+4. `tasks/engine_podman.yaml`
+
+Fa la build dell'immagine con Podman.
+
+```yaml
+- name: Build dell'immagine container tramite Podman
+  containers.podman.podman_image:
+    name: "{{ container_image }}"
+    path: "./Dockerfiles"         
+    dockerfile: "{{ dockerfile_name | default('Dockerfile') }}" 
+    build:
+      cache: true
+      extra_args: "--no-cache"     
+    state: build
+```
+
+### Step 4 - Vault
+
+Per questo step non è stato fatto nulla di particolare perché non ci sono password o informazioni sensibili nei vari playbook fatti. 
+
+##### `Ansible Vault`
+
+Ansible Vault è una funzionalità nativa di Ansible che permette di crittografare file e variabili sensibili (come password, chiavi SSH, ...) direttamente all'interno del progetto. 
+
+Per creare un file crittografato: 
+
+```bash
+ansible-vault create secrets.yaml
+```
+
+Per modificare un file esistente:
+
+```bash
+ansible-vault edit secrets.yaml
+```
+
+Per crittografare un file esistente 
+
+```bash
+ansible-vault encrypt secrets.yaml
+```
+
+Per decrittografare un file:
+
+```bash
+ansible-vault decrypt secrets.yaml
+```
+
+Per visualizzare il contenuto in chiaro e basta:
+
+```bash
+ansible-vault view secrets.yaml
+```
+
+Per integrare i valori contenuti nel vault all'interno di un playbook basta includere il file:
+
+```yaml
+vars_files:
+    - secrets.yaml 
+```
+
+Per eseguire un playbook che contiene valori all'interno del vault è necessario inserire la password creata quando si criptano i dati:
+
+```bash
+# chiede la password a terminale in modo interattivo
+ansible-playbook playbook.yml --ask-vault-pass
+
+# file di testo locale contenente la password
+ansible-playbook playbook.yml --vault-password-file .vault_pass
+```
+
+###### Esempio utilizzo
+
+1. Prendo un file che contiene le password di due utenti:
+
+```yaml
+# secrets.yaml
+user_1_pass: 1234
+user_2_pass: 5678
+```
+
+2. Cripto il file con `ansible-vault`:
+
+```bash
+ansible-vault encrypt secrets.yaml
+```
+
+3. Utilizzo le password in un file dove definisco gli utenti:
+
+```yaml
+---
+# users.yaml
+users:
+  marius:
+    state: present 
+    groups: sudo
+    append: true
+    home: /home/marius 
+    shell: /bin/bash
+    password: "{{ user_1_pass }}" # variabile che si trova nel vault
+    update_password: always
+  tom:
+    state: present 
+    groups: sudo
+    append: true
+    home: /home/tom
+    shell: /bin/bash
+    password: "{{ user_2_pass }}" # variabile che si trova nel vault
+    update_password: always
+```
+
+##### Nota: 
+
+Dato che la sintassi `{{ user_1_pass }}` prende il valore dal vault e lo mette in chiaro, per utilizzare la password come una password criptata devo usare un filtro `jinja2` per criprare il testo!
+
+4. Utilizzo gli utenti in un playbook:
+
+```yaml
+---
+- name: Gestione utenti
+    ansible.builtin.user:
+      name: "{{  item.key }}"
+      state: "{{ item.value.state }}"
+      groups: "{{ item.value.groups }}"
+      append: "{{ item.value.append }}"
+      home: "{{ item.value.home }}"
+      shell: "{{ item.value.shell }}"
+      password: "{{ item.value.password | password_hash('sha512')}}"
+      update_password: "{{ item.value.update_password }}"
+    loop: "{{ users | dict2items }}"
+```
+
+### Step 5 - Jenkins & Ansible
+
+- Creare un container che oltre ai requisiti dello Step 2 abbia anche le seguenti caratteristiche:
+  - Avere attivo il servizio Docker/Podman;
+- Configurare una pipeline Jenkins che:
+  - Esegua una build di un'immagine e la tagghi in modo progressivo
+  - Faccia il push dell'immagine sul registry
+  - Utilizzi Ansibile per eseguire il deploy sul container precedentemente creato 
+  
+1. Per aggiungere docker ad uno dei container fatti allo step 2 basta modificare il Dockerfile. In particolare è stato creato un nuovo Dockerfile chiamato `Dockerfiles/Dockerfile.docker`. Si tratta di un caso di `Docker in Docker`. Quello che va aggiunto è:
+
+```Dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release \
+    openssh-server \
+    sudo \
+    iptables \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+Sono stati aggiunti i pacchetti necessari affinché Docker funzioni.
+
+```Dockerfile
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable" > /etc/apt/sources.list.d/docker.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    docker-ce \
+    docker-ce-cli \
+    containerd.io \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+- `curl -fsSL ...`: Scarica la chiave di cifratura ufficiale di Docker in modo "silenzioso" e seguendo eventuali re-indirizzamenti.
+- `gpg --dearmor`: Converte la chiave dal formato testo (ASCII-armored) al formato binario compresso richiesto da apt.
+- `-o /etc/apt/...`: Salva la chiave convertita nel file docker.gpg. Serve a apt per verificare che i pacchetti Docker che scaricherai siano autentici e non manomessi.
+- `arch=$(dpkg --print-architecture)`: Rileva automaticamente l'architettura del sistema (es. amd64 per Intel/AMD o arm64 per Apple Silicon/ARM).
+- `signed-by=...`: Dice ad apt di fidarsi del repository solo se firmato con la chiave GPG salvata al punto 2.
+- `jammy stable`: Specifica la versione di Ubuntu (jammy = 22.04) e il ramo di pacchetti stabili.
+
+```bash
+usermod -aG docker ansible && \
+```
+
+L'utente `ansible` è stato aggiunto al gruppo `sudo`. 
+
+```Dockerfile
+CMD service docker start && /usr/sbin/sshd -D
+```
+
+Avvia il docker engine e il server ssh.
