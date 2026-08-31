@@ -3,7 +3,7 @@ def buildAndPushTag(Map args) {
     def defaults = [
         registryUrl: 'http://192.168.99.20:5000', 
         dockerfileDir: './Dockerfiles',
-        dockerfileName: 'Dockerfile.ubuntu',
+        dockerfileName: 'Dockerfile.docker',
         buildArgs: '',
         pushLatest: false
     ]
