@@ -44,12 +44,7 @@ pipeline {
         stage('Tag Logic') {
             steps {
                 script {
-                    if (env.TAG_NAME) {
-                        env.DOCKER_TAG = env.TAG_NAME
-                        env.PUSH_LATEST = 'false'
-                    } else {
                         env.DOCKER_TAG = "build-${env.BUILD_NUMBER}"
-                        env.PUSH_LATEST = 'false'
                     }
                 }
             }
@@ -62,7 +57,6 @@ pipeline {
                         registryUrl: env.REGISTRY_URL,
                         image: env.IMAGE_NAME,
                         buildTag: env.DOCKER_TAG,
-                        pushLatest: Boolean.parseBoolean(env.PUSH_LATEST)
                     )
                     echo "Successo! Immagine pushata: ${pushedImage}" 
                 }
