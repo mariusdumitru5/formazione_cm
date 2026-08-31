@@ -47,7 +47,6 @@ pipeline {
                         env.DOCKER_TAG = "build-${env.BUILD_NUMBER}"
                     }
                 }
-            }
         }
         
         stage('Build and Push docker image') {
