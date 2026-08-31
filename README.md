@@ -2,13 +2,27 @@
 
 Questa repo contiene tutto quello che è stato richiesto nei vari step della Track 3. 
 
+---
+## Indice <!-- omit from toc -->
+
+- [Step 1 - Creare il Primo Playbook](#step-1---creare-il-primo-playbook)
+- [Step 2 - Creare Build di container](#step-2---creare-build-di-container)
+- [Step 3 - Creazione di un ruolo](#step-3---creazione-di-un-ruolo)
+- [Step 4 - Vault](#step-4---vault)
+- [Step 5 - Jenkins \& Ansible](#step-5---jenkins--ansible)
+  - [Docker in Docker](#docker-in-docker)
+  - [Jenkins](#jenkins)
+
+---
+
+
 ### Step 1 - Creare il Primo Playbook
 
 Questo step prevede la creazione di un playbook ansible che configuri un docker registry (anche senza autenticazione). 
 
 Per fare questo primo step è stato creato il file `playbooks/container-playbook.yaml`. Il tutto è stato testato su una VM creata con Vagrant.
 
-##### container-playbook.yaml
+##### container-playbook.yaml <!-- omit from toc -->
 
 Questo playbook si occupa di installare docker(tramite un role sviluppato in precedenza) sulla macchina target(Rocky Linux 9). 
 
@@ -76,7 +90,7 @@ Queste build devono generare dei container che abbiano queste caratteristiche:
 
 Per fare questo step è stato creato il playbook `playbooks/build-containers.yaml` e due Dockerfile: `Dockerfiles/Dockerfile.ubuntu` e `Dockerfiles/Dockerfile.rocky`. Il tutto è stato testato in locale. 
 
-##### Dockerfile.ubuntu
+##### Dockerfile.ubuntu <!-- omit from toc -->
 
 Questo Dockerfile utilizza `ubuntu:22.04` come immagine base e configura un ambiente accessibile tramite SSH per Ansible:
 
@@ -132,7 +146,7 @@ CMD ["/usr/sbin/sshd", "-D"]
 
 Per quanto riguarda `Dockerfile.rocky` il procedimento è quasi identico. Bisogna fare `RUN ssh-keygen -A` dopo aver installato il server ssh perché l'installazione del pacchetto `openssh-server` non crea automaticamente le chiavi host del server SSH. Quindi il comando serve proprio a generare tutte le chiavi host mancanti per SSH.
 
-##### build-containers.yaml
+##### build-containers.yaml <!-- omit from toc -->
 
 1. Vengono generati le chiavi ssh tramite il modulo ` community.crypto.openssh_keypair` e poi viene salvato il contenuto della chiave pubblica nella variabile `pub_key_content`:
 
@@ -192,7 +206,7 @@ Per questo step è bastato creare i role con `ansible-galaxy role init` e poi ad
 
 La parte più interessante è stata l'ultimo punto in cui è stato creato un ruolo che funziona sia con Docker che con Podman, in base a quello che c'è sulla macchina taget. Il ruolo in questione si chiama `roles/generic_engine_build`. 
 
-#### generic_engine_build
+#### generic_engine_build <!-- omit from toc -->
 
 1. `defaults/main.yaml`
    
@@ -265,7 +279,7 @@ Fa la build dell'immagine con Podman.
 
 Per questo step non è stato fatto nulla di particolare perché non ci sono password o informazioni sensibili nei vari playbook fatti. 
 
-##### `Ansible Vault`
+##### `Ansible Vault` <!-- omit from toc -->
 
 Ansible Vault è una funzionalità nativa di Ansible che permette di crittografare file e variabili sensibili (come password, chiavi SSH, ...) direttamente all'interno del progetto. 
 
@@ -316,7 +330,7 @@ ansible-playbook playbook.yml --ask-vault-pass
 ansible-playbook playbook.yml --vault-password-file .vault_pass
 ```
 
-###### Esempio utilizzo
+###### Esempio utilizzo <!-- omit from toc -->
 
 1. Prendo un file che contiene le password di due utenti:
 
@@ -356,7 +370,7 @@ users:
     update_password: always
 ```
 
-##### Nota: 
+##### Nota:  <!-- omit from toc -->
 
 Dato che la sintassi `{{ user_1_pass }}` prende il valore dal vault e lo mette in chiaro, per utilizzare la password come una password criptata devo usare un filtro `jinja2` per criprare il testo!
 
@@ -386,6 +400,8 @@ Dato che la sintassi `{{ user_1_pass }}` prende il valore dal vault e lo mette i
   - Faccia il push dell'immagine sul registry
   - Utilizzi Ansibile per eseguire il deploy sul container precedentemente creato 
   
+#### Docker in Docker
+
 1. Per aggiungere docker ad uno dei container fatti allo step 2 basta modificare il Dockerfile. In particolare è stato creato un nuovo Dockerfile chiamato `Dockerfiles/Dockerfile.docker`. Si tratta di un caso di `Docker in Docker`. Quello che va aggiunto è:
 
 ```Dockerfile
@@ -432,3 +448,52 @@ CMD service docker start && /usr/sbin/sshd -D
 ```
 
 Avvia il docker engine e il server ssh.
+
+#### Jenkins
+
+Per la seconda parte dobbiamo creare una pipeline `Jenkins` in grado di fare la build dell'immagine docker definita prima e poi il push sul registry locale. 
+
+Come prima cosa possiamo definire la seguente funzione:
+
+```groovy
+// funzione helper che fa la build di un'immagine docker e poi da il push su un registry
+def buildAndPushTag(Map args) {
+    def defaults = [
+        registryUrl: 'http://192.168.99.20:5000',  // indirizzo registry locale
+        dockerfileDir: './Dockerfiles',
+        dockerfileName: 'Dockerfile.docker',
+        buildArgs: '',
+        pushLatest: false
+    ]
+    def config = defaults + args
+
+    
+    // logica del push e del tag
+    docker.withRegistry(config.registryUrl) {
+      
+        def dockerfileFile = "${config.dockerfileDir}/${config.dockerfileName}"
+        def image = docker.build("${config.image}:${config.buildTag}", "${config.buildArgs} -f ${dockerfileFile} ${config.dockerfileDir}") 
+        image.push()
+
+        if (config.pushLatest) {
+            image.push('latest')
+            sh "docker rmi --force ${config.image}:latest"
+        }
+        
+        sh "docker rmi --force ${config.image}:${config.buildTag}"
+        return "${config.image}:${config.buildTag}"
+    }
+}
+```
+
+Ora per quanto riguarda la pipeline, abbiamo tre stages importanti:
+
+```groovy
+stage('Checkout')
+stage('Tag Logic') 
+stage('Build and Push docker image')
+```
+
+- Il primo stage serve a scaricare l'ultima versione del codice sorgente all'interno dell'ambiente di lavoro temporaneo di Jenkins.
+- Il  secondo stage serve a definire una variabile d'ambiente chiamata `DOCKER_TAG`. Assegna a questa variabile il prefisso `build-` seguito dal numero progressivo della build di Jenkins (es. build-1, build-2). Serve a garantire che ogni immagine docker creata abbia un tag univoco e tracciabile.+
+- Il terzo stage si occupa di fare la build e di pushare l'immagine docker utilizzando la funzione helper.
